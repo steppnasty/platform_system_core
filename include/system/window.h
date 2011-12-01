@@ -23,6 +23,10 @@
 #include <cutils/native_handle.h>
 #include <cstring>
 
+#ifdef __cplusplus
+#include <string.h>
+#endif
+
 __BEGIN_DECLS
 
 /*****************************************************************************/
