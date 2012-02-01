@@ -31,7 +31,6 @@
 #include <sys/resource.h>
 #include <linux/loop.h>
 #include <cutils/partition_utils.h>
-#include <sys/system_properties.h>
 
 #include "init.h"
 #include "keywords.h"
@@ -449,15 +448,22 @@ int do_setprop(int nargs, char **args)
 {
     const char *name = args[1];
     const char *value = args[2];
-    char prop_val[PROP_VALUE_MAX];
-    int ret;
 
-    ret = expand_props(prop_val, value, sizeof(prop_val));
-    if (ret) {
-        ERROR("cannot expand '%s' while assigning to '%s'\n", value, name);
-        return -EINVAL;
+    if (value[0] == '$') {
+        /* Use the value of a system property if value starts with '$' */
+        value++;
+        if (value[0] != '$') {
+            value = property_get(value);
+            if (!value) {
+                ERROR("property %s has no value for assigning to %s\n", value, name);
+                return -EINVAL;
+            }
+        } /* else fall through to support double '$' prefix for setting properties
+           * to string literals that start with '$'
+           */
     }
-    property_set(name, prop_val);
+
+    property_set(name, value);
     return 0;
 }
 
@@ -540,15 +546,21 @@ int do_write(int nargs, char **args)
 {
     const char *path = args[1];
     const char *value = args[2];
-    char prop_val[PROP_VALUE_MAX];
-    int ret;
-
-    ret = expand_props(prop_val, value, sizeof(prop_val));
-    if (ret) {
-        ERROR("cannot expand '%s' while writing to '%s'\n", value, path);
-        return -EINVAL;
+    if (value[0] == '$') {
+        /* Write the value of a system property if value starts with '$' */
+        value++;
+        if (value[0] != '$') {
+            value = property_get(value);
+            if (!value) {
+                ERROR("property %s has no value for writing to %s\n", value, path);
+                return -EINVAL;
+            }
+        } /* else fall through to support double '$' prefix for writing
+           * string literals that start with '$'
+           */
     }
-    return write_file(path, prop_val);
+
+    return write_file(path, value);
 }
 
 int do_copy(int nargs, char **args)
