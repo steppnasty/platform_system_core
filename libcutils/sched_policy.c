@@ -16,23 +16,31 @@
 ** limitations under the License.
 */
 
+#define LOG_TAG "SchedPolicy"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-
-#define LOG_TAG "SchedPolicy"
+#include <cutils/sched_policy.h>
 #include "cutils/log.h"
+
+/* Re-map SP_DEFAULT to the system default policy, and leave other values unchanged.
+ * Call this any place a SchedPolicy is used as an input parameter.
+ * Returns the possibly re-mapped policy.
+ */
+static inline SchedPolicy _policy(SchedPolicy p)
+{
+    return p == SP_DEFAULT ? SP_SYSTEM_DEFAULT : p;
+}
 
 #ifdef HAVE_SCHED_H
 #ifdef HAVE_PTHREADS
 
 #include <sched.h>
 #include <pthread.h>
-
-#include <cutils/sched_policy.h>
 
 #ifndef SCHED_NORMAL
   #define SCHED_NORMAL 0
