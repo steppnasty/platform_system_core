@@ -22,8 +22,10 @@ extern "C" {
 #endif
 
 typedef enum {
+    SP_DEFAULT    = -1,
     SP_BACKGROUND = 0,
     SP_FOREGROUND = 1,
+    SP_SYSTEM_DEFAULT = SP_FOREGROUND,
 } SchedPolicy;
 
 extern int set_sched_policy(int tid, SchedPolicy policy);

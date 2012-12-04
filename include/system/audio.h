@@ -146,6 +146,15 @@ typedef enum {
 #ifdef QCOM_HARDWARE
     AUDIO_FORMAT_EVRC                = 0x08000000UL,
     AUDIO_FORMAT_QCELP               = 0x09000000UL,
+    AUDIO_FORMAT_AC3                 = 0x0a000000UL,
+    AUDIO_FORMAT_AC3_PLUS            = 0x0b000000UL,
+    AUDIO_FORMAT_DTS                 = 0x0c000000UL,
+    AUDIO_FORMAT_WMA                 = 0x0d000000UL,  
+    AUDIO_FORMAT_WMA_PRO             = 0x0e000000UL,
+    AUDIO_FORMAT_AAC_ADIF            = 0x0f000000UL,
+    AUDIO_FORMAT_EVRCB               = 0x10000000UL,
+    AUDIO_FORMAT_EVRCWB              = 0x11000000UL,
+    AUDIO_FORMAT_EAC3                = 0x12000000UL,
 #endif
     AUDIO_FORMAT_MAIN_MASK           = 0xFF000000UL,
     AUDIO_FORMAT_SUB_MASK            = 0x00FFFFFFUL,
@@ -193,6 +202,10 @@ typedef enum {
                                   AUDIO_CHANNEL_OUT_FRONT_RIGHT |
                                   AUDIO_CHANNEL_OUT_FRONT_CENTER |
                                   AUDIO_CHANNEL_OUT_BACK_CENTER),
+#ifdef QCOM_HARDWARE
+    AUDIO_CHANNEL_OUT_PENTA =    (AUDIO_CHANNEL_OUT_QUAD |
+                                  AUDIO_CHANNEL_OUT_FRONT_CENTER),
+#endif    
     AUDIO_CHANNEL_OUT_5POINT1  = (AUDIO_CHANNEL_OUT_FRONT_LEFT |
                                   AUDIO_CHANNEL_OUT_FRONT_RIGHT |
                                   AUDIO_CHANNEL_OUT_FRONT_CENTER |
@@ -242,9 +255,28 @@ typedef enum {
     AUDIO_CHANNEL_IN_Z_AXIS          = 0x2000,
     AUDIO_CHANNEL_IN_VOICE_UPLINK    = 0x4000,
     AUDIO_CHANNEL_IN_VOICE_DNLINK    = 0x8000,
+#ifdef QCOM_HARDWARE
+    AUDIO_CHANNEL_IN_FRONT_LEFT      = 0x10000,
+    AUDIO_CHANNEL_IN_FRONT_RIGHT     = 0x20000,
+    AUDIO_CHANNEL_IN_FRONT_CENTER    = 0x40000,
+    AUDIO_CHANNEL_IN_LOW_FREQUENCY   = 0x80000,
+    AUDIO_CHANNEL_IN_BACK_LEFT       = 0x100000,
+    AUDIO_CHANNEL_IN_BACK_RIGHT      = 0x200000,
+#endif
 
     AUDIO_CHANNEL_IN_MONO   = AUDIO_CHANNEL_IN_FRONT,
     AUDIO_CHANNEL_IN_STEREO = (AUDIO_CHANNEL_IN_LEFT | AUDIO_CHANNEL_IN_RIGHT),
+#ifdef QCOM_HARDWARE
+    AUDIO_CHANNEL_IN_VOICE_UPLINK_MONO = (AUDIO_CHANNEL_IN_VOICE_UPLINK | AUDIO_CHANNEL_IN_MONO),
+    AUDIO_CHANNEL_IN_VOICE_DNLINK_MONO = (AUDIO_CHANNEL_IN_VOICE_DNLINK | AUDIO_CHANNEL_IN_MONO),
+    AUDIO_CHANNEL_IN_VOICE_CALL_MONO   = (AUDIO_CHANNEL_IN_VOICE_UPLINK_MONO | AUDIO_CHANNEL_IN_VOICE_DNLINK_MONO),
+    AUDIO_CHANNEL_IN_5POINT1 = (AUDIO_CHANNEL_IN_FRONT_LEFT |
+                               AUDIO_CHANNEL_IN_FRONT_RIGHT |
+                               AUDIO_CHANNEL_IN_FRONT_CENTER |
+                               AUDIO_CHANNEL_IN_LOW_FREQUENCY |
+                               AUDIO_CHANNEL_IN_BACK_LEFT |
+                               AUDIO_CHANNEL_IN_BACK_RIGHT),
+#endif
     AUDIO_CHANNEL_IN_ALL    = (AUDIO_CHANNEL_IN_LEFT |
                                AUDIO_CHANNEL_IN_RIGHT |
                                AUDIO_CHANNEL_IN_FRONT |
@@ -259,7 +291,9 @@ typedef enum {
                                AUDIO_CHANNEL_IN_Z_AXIS |
                                AUDIO_CHANNEL_IN_VOICE_UPLINK |
                                AUDIO_CHANNEL_IN_VOICE_DNLINK),
-} audio_channels_t;
+};
+
+typedef uint32_t audio_channel_mask_t;
 
 typedef enum {
     AUDIO_MODE_INVALID          = -2,
@@ -297,13 +331,16 @@ typedef enum {
     AUDIO_DEVICE_OUT_AUX_DIGITAL               = 0x400,
     AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET         = 0x800,
     AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET         = 0x1000,
-#ifdef QCOM_HARDWARE
-    AUDIO_DEVICE_OUT_FM                        = 0x2000,
-    AUDIO_DEVICE_OUT_ANC_HEADSET               = 0x4000,
-    AUDIO_DEVICE_OUT_ANC_HEADPHONE             = 0x8000,
+    AUDIO_DEVICE_OUT_USB_ACCESSORY             = 0x2000,
+    AUDIO_DEVICE_OUT_USB_DEVICE                = 0x4000,
+#ifdef QCOM_FM_ENABLED
+    AUDIO_DEVICE_OUT_FM                        = 0x8000,
     AUDIO_DEVICE_OUT_FM_TX                     = 0x10000,
+#endif
+#ifdef QCOM_HARDWARE
     AUDIO_DEVICE_OUT_DIRECTOUTPUT              = 0x20000,
-    AUDIO_DEVICE_OUT_DEFAULT                   = 0x80000,
+    AUDIO_DEVICE_OUT_PROXY                     = 0x80000,
+    AUDIO_DEVICE_OUT_DEFAULT                   = AUDIO_DEVICE_OUT_SPEAKER,
 #else
     AUDIO_DEVICE_OUT_DEFAULT                   = 0x8000,
 #endif
@@ -320,12 +357,15 @@ typedef enum {
                                  AUDIO_DEVICE_OUT_AUX_DIGITAL |
                                  AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET |
                                  AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET |
-#ifdef QCOM_HARDWARE
+                                 AUDIO_DEVICE_OUT_USB_ACCESSORY |
+                                 AUDIO_DEVICE_OUT_USB_DEVICE |
+#ifdef QCOM_FM_ENABLED
                                  AUDIO_DEVICE_OUT_FM |
-                                 AUDIO_DEVICE_OUT_ANC_HEADSET |
-                                 AUDIO_DEVICE_OUT_ANC_HEADPHONE |
                                  AUDIO_DEVICE_OUT_FM_TX |
+#endif
+#ifdef QCOM_HARDWARE
                                  AUDIO_DEVICE_OUT_DIRECTOUTPUT |
+                                 AUDIO_DEVICE_OUT_PROXY |
 #endif
                                  AUDIO_DEVICE_OUT_DEFAULT),
     AUDIO_DEVICE_OUT_ALL_A2DP = (AUDIO_DEVICE_OUT_BLUETOOTH_A2DP |
@@ -334,6 +374,8 @@ typedef enum {
     AUDIO_DEVICE_OUT_ALL_SCO  = (AUDIO_DEVICE_OUT_BLUETOOTH_SCO |
                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET |
                                  AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT),
+    AUDIO_DEVICE_OUT_ALL_USB  = (AUDIO_DEVICE_OUT_USB_ACCESSORY |
+                                 AUDIO_DEVICE_OUT_USB_DEVICE),
 
     /* input devices */
 #ifdef QCOM_HARDWARE
@@ -377,6 +419,36 @@ typedef enum {
     AUDIO_DEVICE_IN_ALL_SCO = AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET,
 } audio_devices_t;
 
+/* the audio output flags serve two purposes:
+ * - when an AudioTrack is created they indicate a "wish" to be connected to an
+ * output stream with attributes corresponding to the specified flags
+ * - when present in an output profile descriptor listed for a particular audio
+ * hardware module, they indicate that an output stream can be opened that
+ * supports the attributes indicated by the flags.
+ * The audio policy manager will try to match the flags in the request
+ * (when getOutput() is called) to an available output stream.
+ */
+typedef enum {
+    AUDIO_OUTPUT_FLAG_NONE = 0x0,	// no attributes
+    AUDIO_OUTPUT_FLAG_DIRECT = 0x1,	// this output directly connects a track
+					// to one output stream: no software mixer
+    AUDIO_OUTPUT_FLAG_PRIMARY = 0x2,	// this output is the primary output of 
+					// the device.  It is unique and must be
+					// receives routing, audio mode and volume
+					// controls related to voice calls.
+    AUDIO_OUTPUT_FLAG_FAST = 0x4,	// output supports "fast tracks",
+					// defined elsewhere
+    AUDIO_OUTPUT_FLAG_DEEP_BUFFER = 0x8,// use deep audio buffers
+#ifdef QCOM_HARDWARE
+//Qualcomm Flags
+    AUDIO_OUTPUT_FLAG_LPA = 0x1000,	// use LPA
+    AUDIO_OUTPUT_FLAG_TUNNEL = 0x2000,	// use Tunnel
+    AUDIO_OUTPUT_FLAG_VOIP_RX = 0x4000	// use this flag in combination with DIRECT to
+					// indicate HAL to activate EC & NS
+					// path for VOIP calls
+#endif
+} audio_output_flags_t;
+
 static inline bool audio_is_output_device(audio_devices_t device)
 {
     if ((popcount(device) == 1) && ((device & ~AUDIO_DEVICE_OUT_ALL) == 0))
@@ -410,6 +482,14 @@ static inline bool audio_is_bluetooth_sco_device(audio_devices_t device)
         return false;
 }
 
+static inline bool audio_is_usb_device(audio_devices_t device)
+{
+    if ((popcount(device) == 1) && (device & AUDIO_DEVICE_OUT_ALL_USB))
+        return true;
+    else
+        return false;
+}
+
 static inline bool audio_is_input_channel(uint32_t channel)
 {
     if ((channel & ~AUDIO_CHANNEL_IN_ALL) == 0)
@@ -424,6 +504,55 @@ static inline bool audio_is_output_channel(uint32_t channel)
         return true;
     else
         return false;
+}
+
+/* Derive an output channel mask from a channel count.
+ * This is to be used when the content channel mask is unknown.  The 1, 2, 4, 5, 6, 7 and 8 
+ * channel cases are mapped to the standard game/home-theater layouts, but note that 4 is 
+ * mapped to quad, and not stereo + FC + mono surrount. A chnnel count of 3 is arbitrarily
+ * mapped to stereo + FC for continuity with stereo.
+ * Returns the matching channel mask, or 0 if the number of channels exceeds that of the 
+ * configurations for which a default channel mask is defined.
+ */
+static inline audio_channel_mask_t audio_channel_out_mask_from_count(uint32_t channel_count)
+{
+    switch(channel_count) {
+    case 1:
+	return AUDIO_CHANNEL_OUT_MONO;
+    case 2:
+	return AUDIO_CHANNEL_OUT_STEREO;
+    case 3:
+	return (AUDIO_CHANNEL_OUT_STEREO | AUDIO_CHANNEL_OUT_FRONT_CENTER);
+    case 4: // 4.0
+	return AUDIO_CHANNEL_OUT_QUAD;
+    case 5: // 5.0
+	return (AUDIO_CHANNEL_OUT_QUAD | AUDIO_CHANNEL_OUT_FRONT_CENTER);
+    case 6: // 5.1
+	return AUDIO_CHANNEL_OUT_5POINT1;
+    case 7: // 6.1
+	return (AUDIO_CHANNEL_OUT_5POINT1 | AUDIO_CHANNEL_OUT_BACK_CENTER);
+    case 8:
+	return AUDIO_CHANNEL_OUT_7POINT1;
+    default:
+	return 0;
+    }
+}
+
+/* Similar to above, but for input.  Currently handles mono and stereo and 5.1 input. */
+static inline audio_channel_mask_t audio_channel_in_mask_from_count(uint32_t channel_count)
+{
+    switch (channel_count) {
+    case 1:
+        return AUDIO_CHANNEL_IN_MONO;
+    case 2:
+        return AUDIO_CHANNEL_IN_STEREO;
+#ifdef QCOM_HARDWARE
+    case 6:
+        return AUDIO_CHANNEL_IN_5POINT1;
+#endif
+    default:
+        return 0;
+    }
 }
 
 static inline bool audio_is_valid_format(uint32_t format)
@@ -444,6 +573,14 @@ static inline bool audio_is_valid_format(uint32_t format)
 #ifdef QCOM_HARDWARE
     case AUDIO_FORMAT_QCELP:
     case AUDIO_FORMAT_EVRC:
+    case AUDIO_FORMAT_EVRCB:
+    case AUDIO_FORMAT_EVRCWB:
+    case AUDIO_FORMAT_AC3:
+    case AUDIO_FORMAT_EAC3:
+    case AUDIO_FORMAT_AAC_ADIF:
+    case AUDIO_FORMAT_WMA:
+    case AUDIO_FORMAT_WMA_PRO:
+    case AUDIO_FORMAT_DTS:
 #endif
         return true;
     default:
