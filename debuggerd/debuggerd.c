@@ -38,8 +38,8 @@
 
 #include <private/android_filesystem_config.h>
 
-#include "debuggerd.h"
-#include "utility.h"
+#include <cutils/debuggerd.h>
+#include <cutils/utility.h>
 
 #define ANDROID_LOG_INFO 4
 

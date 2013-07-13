@@ -22,7 +22,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include "utility.h"
+#include <cutils/utility.h>
 
 /* Get a word from pid using ptrace. The result is the return value. */
 int get_remote_word(int pid, void *src)

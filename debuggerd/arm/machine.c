@@ -34,7 +34,7 @@
 #include <linux/input.h>
 #include <linux/user.h>
 
-#include "utility.h"
+#include <cutils/utility.h>
 
 /* enable to dump memory pointed to by every register */
 #define DUMP_MEM_FOR_ALL_REGS 0

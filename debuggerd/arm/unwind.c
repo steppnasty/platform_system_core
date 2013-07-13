@@ -35,9 +35,9 @@
 #include <cutils/logd.h>
 #include <sys/ptrace.h>
 #include <unwind.h>
-#include "utility.h"
+#include <cutils/utility.h>
 
-#include "symbol_table.h"
+#include <cutils/symbol_table.h>
 
 typedef struct _ZSt9type_info type_info; /* This names C++ type_info type */
 

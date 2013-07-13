@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,30 +14,28 @@
  * limitations under the License.
  */
 
-#ifndef __CUTILS_SCHED_POLICY_H
-#define __CUTILS_SCHED_POLICY_H
+#ifndef __CUTILS_MULTIUSER_H
+#define __CUTILS_MULTIUSER_H
+
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum {
-    SP_DEFAULT    = -1,
-    SP_BACKGROUND = 0,
-    SP_FOREGROUND = 1,
-    SP_SYSTEM     = 2,  // can't be used with set_sched_policy()
-    SP_AUDIO_APP  = 3,
-    SP_AUDIO_SYS  = 4,
-    SP_CNT,
-    SP_MAX        = SP_CNT - 1,
-    SP_SYSTEM_DEFAULT = SP_FOREGROUND,
-} SchedPolicy;
+// NOTE: keep in sync with android.os.UserId
 
-extern int set_sched_policy(int tid, SchedPolicy policy);
-extern int get_sched_policy(int tid, SchedPolicy *policy);
+#define MULTIUSER_APP_PER_USER_RANGE 100000
+
+typedef uid_t userid_t;
+typedef uid_t appid_t;
+
+extern userid_t multiuser_get_user_id(uid_t uid);
+extern appid_t multiuser_get_app_id(uid_t uid);
+extern uid_t multiuser_get_uid(userid_t userId, appid_t appId);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __CUTILS_SCHED_POLICY_H */ 
+#endif /* __CUTILS_MULTIUSER_H */

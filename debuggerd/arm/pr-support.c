@@ -35,7 +35,7 @@
 #include <sys/types.h>
 #include <unwind.h>
 
-#include "utility.h"
+#include <cutils/utility.h>
 
 /* We add a prototype for abort here to avoid creating a dependency on
    target headers.  */

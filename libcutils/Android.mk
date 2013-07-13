@@ -74,9 +74,11 @@ ifeq ($(WINDOWS_HOST_ONLY),1)
 else
     commonSources += \
         abort_socket.c \
+        fs.c \
         mspace.c \
         selector.c \
         tztime.c \
+        multiuser.c \
         zygote.c
 
     commonHostSources += \
@@ -109,7 +111,15 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 # ========================================================
 include $(CLEAR_VARS)
 LOCAL_MODULE := libcutils
-LOCAL_SRC_FILES := $(commonSources) ashmem-dev.c mq.c android_reboot.c partition_utils.c uevent.c qtaguid.c klog.c
+LOCAL_SRC_FILES := $(commonSources) \
+        ashmem-dev.c                \
+        debugger.c                  \
+        mq.c                        \
+        android_reboot.c            \
+        partition_utils.c           \
+        uevent.c                    \
+        qtaguid.c                   \
+        klog.c
 
 ifeq ($(TARGET_ARCH),arm)
 LOCAL_SRC_FILES += arch-arm/memset32.S

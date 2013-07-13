@@ -4,8 +4,8 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-#include "symbol_table.h"
-#include "utility.h"
+#include <cutils/symbol_table.h>
+#include <cutils/utility.h>
 
 #include <linux/elf.h>
 
