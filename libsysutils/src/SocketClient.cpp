@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <pthread.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #define LOG_TAG "SocketClient"
 #include <cutils/log.h>
@@ -78,6 +79,56 @@ int SocketClient::sendMsg(int code, const char *msg, bool addErrno, bool useCmdN
     return ret;
 }
 
+/** send 3-digit code, null, binary-length, binary data */
+int SocketClient::sendBinaryMsg(int code, const void *data, int len) {
+
+    /* 4 bytes for the code & null + 4 bytes for the len */
+    char buf[8];
+    /* Write the code */
+    snprintf(buf, 4, "%.3d", code);
+    /* Write the len */
+    uint32_t tmp = htonl(len);
+    memcpy(buf + 4, &tmp, sizeof(uint32_t));
+
+    pthread_mutex_lock(&mWriteMutex);
+    int result = sendDataLocked(buf, sizeof(buf));
+    if (result == 0 && len > 0) {
+        result = sendDataLocked(data, len);
+    }
+    pthread_mutex_unlock(&mWriteMutex);
+
+    return result;
+}
+
+// Sends the code (c-string null-terminated).
+int SocketClient::sendCode(int code) {
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%.3d", code);
+    return sendData(buf, sizeof(buf));
+}
+
+char *SocketClient::quoteArg(const char *arg) {
+    int len = strlen(arg);
+    char *result = (char *)malloc(len * 2 + 3);
+    char *current = result;
+    const char *end = arg + len;
+
+    *(current++) = '"';
+    while (arg < end) {
+        switch (*arg) {
+        case '\\':
+        case '"':
+            *(current++) = '\\'; // fallthrough
+        default:
+            *(current++) = *(arg++);
+        }
+    }
+    *(current++) = '"';
+    *(current++) = '\0';
+    result = (char *)realloc(result, current-result);
+    return result;
+}
+
 int SocketClient::sendMsg(const char *msg) {
     // Send the message including null character
     if (sendData(msg, strlen(msg) + 1) != 0) {
@@ -88,6 +139,15 @@ int SocketClient::sendMsg(const char *msg) {
 }
 
 int SocketClient::sendData(const void* data, int len) {
+
+    pthread_mutex_lock(&mWriteMutex);
+    int rc = sendDataLocked(data, len);
+    pthread_mutex_unlock(&mWriteMutex);
+
+    return rc;
+}
+
+int SocketClient::sendDataLocked(const void *data, int len) {
     int rc = 0;
     const char *p = (const char*) data;
     int brtw = len;
@@ -101,9 +161,8 @@ int SocketClient::sendData(const void* data, int len) {
         return 0;
     }
 
-    pthread_mutex_lock(&mWriteMutex);
     while (brtw > 0) {
-        rc = write(mSocket, p, brtw);
+        rc = send(mSocket, p, brtw, MSG_NOSIGNAL);
         if (rc > 0) {
             p += rc;
             brtw -= rc;
@@ -113,7 +172,6 @@ int SocketClient::sendData(const void* data, int len) {
         if (rc < 0 && errno == EINTR)
             continue;
 
-        pthread_mutex_unlock(&mWriteMutex);
         if (rc == 0) {
             SLOGW("0 length write :(");
             errno = EIO;
@@ -122,7 +180,6 @@ int SocketClient::sendData(const void* data, int len) {
         }
         return -1;
     }
-    pthread_mutex_unlock(&mWriteMutex);
     return 0;
 }
 
