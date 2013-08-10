@@ -75,7 +75,6 @@ else
     commonSources += \
         abort_socket.c \
         fs.c \
-        mspace.c \
         selector.c \
         tztime.c \
         multiuser.c \
@@ -109,6 +108,12 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 
 # Shared and static library for target
 # ========================================================
+
+# This is needed in LOCAL_C_INCLUDES to access the C library's private
+# headeer name <bionic_time.h>
+#
+libcutils_c_includes := bionic/libc/private
+
 include $(CLEAR_VARS)
 LOCAL_MODULE := libcutils
 LOCAL_SRC_FILES := $(commonSources) \

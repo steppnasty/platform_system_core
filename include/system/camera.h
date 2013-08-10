@@ -145,9 +145,15 @@ enum {
      */
     CAMERA_CMD_STOP_FACE_DETECTION = 7,
 
-    CAMERA_CMD_HISTOGRAM_ON     = 8,
-    CAMERA_CMD_HISTOGRAM_OFF     = 9,
-    CAMERA_CMD_HISTOGRAM_SEND_DATA  = 10,
+    /**
+     * Enable/disable focus move callback (CAMERA_MSG_FOCUS_MOVE). Passing
+     * arg1 = 0 will disable, while passing arg1 = 1 will enable the callback.
+     */
+    CAMERA_CMD_ENABLE_FOCUS_MOVE_MSG = 8,
+
+    CAMERA_CMD_HISTOGRAM_ON     = 9,
+    CAMERA_CMD_HISTOGRAM_OFF     = 10,
+    CAMERA_CMD_HISTOGRAM_SEND_DATA  = 11,
 
 };
 
