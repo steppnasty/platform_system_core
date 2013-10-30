@@ -125,12 +125,10 @@ void restart_root_service(int fd, void *cookie)
             return;
         }
 
+        property_set("service.adb.root", "1");
         snprintf(buf, sizeof(buf), "restarting adbd as root\n");
         writex(fd, buf, strlen(buf));
         adb_close(fd);
-
-        // This will cause a property trigger in init.rc to restart us
-        property_set("service.adb.root", "1");
     }
 }
 
@@ -152,10 +150,6 @@ void restart_tcp_service(int fd, void *cookie)
     snprintf(buf, sizeof(buf), "restarting in TCP mode port: %d\n", port);
     writex(fd, buf, strlen(buf));
     adb_close(fd);
-
-    // quit, and init will restart us in TCP mode
-    sleep(1);
-    exit(1);
 }
 
 void restart_usb_service(int fd, void *cookie)
@@ -166,10 +160,6 @@ void restart_usb_service(int fd, void *cookie)
     snprintf(buf, sizeof(buf), "restarting in USB mode\n");
     writex(fd, buf, strlen(buf));
     adb_close(fd);
-
-    // quit, and init will restart us in USB mode
-    sleep(1);
-    exit(1);
 }
 
 void reboot_service(int fd, void *arg)
@@ -343,10 +333,8 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
 
 #if ADB_HOST
 #define SHELL_COMMAND "/bin/sh"
-#define ALTERNATE_SHELL_COMMAND ""
 #else
 #define SHELL_COMMAND "/system/bin/sh"
-#define ALTERNATE_SHELL_COMMAND "/sbin/sh"
 #endif
 
 #if !ADB_HOST
@@ -371,7 +359,6 @@ static void subproc_waiter_service(int fd, void *cookie)
                 break;
             }
          }
-        usleep(100000);  // poll every 0.1 sec
     }
     D("shell exited fd=%d of pid=%d err=%d\n", fd, pid, errno);
     if (SHELL_EXIT_NOTIFY_FD >=0) {
@@ -388,19 +375,10 @@ static int create_subproc_thread(const char *name)
     adb_thread_t t;
     int ret_fd;
     pid_t pid;
-    const char* shell_command;
-    struct stat filecheck;
-    if (stat(ALTERNATE_SHELL_COMMAND, &filecheck) == 0) {
-        shell_command = ALTERNATE_SHELL_COMMAND;
-    }
-    else {
-        shell_command = SHELL_COMMAND;
-    }
-    
     if(name) {
-        ret_fd = create_subprocess(shell_command, "-c", name, &pid);
+        ret_fd = create_subprocess(SHELL_COMMAND, "-c", name, &pid);
     } else {
-        ret_fd = create_subprocess(shell_command, "-", 0, &pid);
+        ret_fd = create_subprocess(SHELL_COMMAND, "-", 0, &pid);
     }
     D("create_subprocess() ret_fd=%d pid=%d\n", ret_fd, pid);
 

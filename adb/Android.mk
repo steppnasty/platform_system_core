@@ -33,16 +33,16 @@ endif
 
 ifeq ($(HOST_OS),windows)
   USB_SRCS := usb_windows.c
-  EXTRA_SRCS := get_my_path_windows.c
+  EXTRA_SRCS := get_my_path_windows.c ../libcutils/list.c
   EXTRA_STATIC_LIBS := AdbWinApi
   ifneq ($(strip $(USE_CYGWIN)),)
     # Pure cygwin case
-    LOCAL_LDLIBS += -lpthread
+    LOCAL_LDLIBS += -lpthread -lgdi32
     LOCAL_C_INCLUDES += /usr/include/w32api/ddk
   endif
   ifneq ($(strip $(USE_MINGW)),)
     # MinGW under Linux case
-    LOCAL_LDLIBS += -lws2_32
+    LOCAL_LDLIBS += -lws2_32 -lgdi32
     USE_SYSDEPS_WIN32 := 1
     LOCAL_C_INCLUDES += /usr/i586-mingw32msvc/include/ddk
   endif
@@ -57,6 +57,7 @@ LOCAL_SRC_FILES := \
 	transport_usb.c \
 	commandline.c \
 	adb_client.c \
+	adb_auth_host.c \
 	sockets.c \
 	services.c \
 	file_sync_client.c \
@@ -65,6 +66,7 @@ LOCAL_SRC_FILES := \
 	utils.c \
 	usb_vendors.c
 
+LOCAL_C_INCLUDES += external/openssl/include
 
 ifneq ($(USE_SYSDEPS_WIN32),)
   LOCAL_SRC_FILES += sysdeps_win32.c
@@ -72,27 +74,18 @@ else
   LOCAL_SRC_FILES += fdevent.c
 endif
 
-LOCAL_CFLAGS += -g -DADB_HOST=1  -Wall -Wno-unused-parameter
-# adb can't be built without optimizations, so we enforce -O2 if no
-# other optimization flag is set - but we don't override what the global
-# flags are saying if something else is given (-Os or -O3 are useful)
-ifeq ($(findstring -O, $(HOST_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
-ifneq ($(findstring -O0, $(HOST_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
+LOCAL_CFLAGS += -O2 -g -DADB_HOST=1  -Wall -Wno-unused-parameter
 LOCAL_CFLAGS += -D_XOPEN_SOURCE -D_GNU_SOURCE
 LOCAL_MODULE := adb
 
-LOCAL_STATIC_LIBRARIES := libzipfile libunz $(EXTRA_STATIC_LIBS)
+LOCAL_STATIC_LIBRARIES := libzipfile libunz libcrypto_static $(EXTRA_STATIC_LIBS)
 ifeq ($(USE_SYSDEPS_WIN32),)
 	LOCAL_STATIC_LIBRARIES += libcutils
 endif
 
 include $(BUILD_HOST_EXECUTABLE)
 
-$(call dist-for-goals,dist_files,$(LOCAL_BUILT_MODULE))
+$(call dist-for-goals,dist_files sdk,$(LOCAL_BUILT_MODULE))
 
 ifeq ($(HOST_OS),windows)
 $(LOCAL_INSTALLED_MODULE): \
@@ -104,16 +97,6 @@ endif
 # adbd device daemon
 # =========================================================
 
-BUILD_ADBD := true
-
-# build adbd for the Linux simulator build
-# so we can use it to test the adb USB gadget driver on x86
-#ifeq ($(HOST_OS),linux)
-#    BUILD_ADBD := true
-#endif
-
-
-ifeq ($(BUILD_ADBD),true)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
@@ -123,6 +106,7 @@ LOCAL_SRC_FILES := \
 	transport.c \
 	transport_local.c \
 	transport_usb.c \
+	adb_auth_client.c \
 	sockets.c \
 	services.c \
 	file_sync_service.c \
@@ -133,26 +117,11 @@ LOCAL_SRC_FILES := \
 	log_service.c \
 	utils.c
 
-LOCAL_CFLAGS := -g -DADB_HOST=0 -Wall -Wno-unused-parameter
-# adb can't be built without optimizations, so we enforce -O2 if no
-# other optimization flag is set - but we don't override what the global
-# flags are saying if something else is given (-Os or -O3 are useful)
-ifeq ($(findstring -O, $(TARGET_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
-ifneq ($(findstring -O0, $(TARGET_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
+LOCAL_CFLAGS := -O2 -g -DADB_HOST=0 -Wall -Wno-unused-parameter
 LOCAL_CFLAGS += -D_XOPEN_SOURCE -D_GNU_SOURCE
 
-# TODO: This should probably be board specific, whether or not the kernel has
-# the gadget driver; rather than relying on the architecture type.
-ifeq ($(TARGET_ARCH),arm)
-LOCAL_CFLAGS += -DANDROID_GADGET=1
-endif
-
-ifeq ($(BOARD_ALWAYS_INSECURE),true)
-	LOCAL_CFLAGS += -DBOARD_ALWAYS_INSECURE
+ifneq (,$(filter userdebug eng,$(TARGET_BUILD_VARIANT)))
+LOCAL_CFLAGS += -DALLOW_ADBD_ROOT=1
 endif
 
 LOCAL_MODULE := adbd
@@ -161,10 +130,8 @@ LOCAL_FORCE_STATIC_EXECUTABLE := true
 LOCAL_MODULE_PATH := $(TARGET_ROOT_OUT_SBIN)
 LOCAL_UNSTRIPPED_PATH := $(TARGET_ROOT_OUT_SBIN_UNSTRIPPED)
 
-LOCAL_STATIC_LIBRARIES := libcutils libc
+LOCAL_STATIC_LIBRARIES := libcutils libc libmincrypt
 include $(BUILD_EXECUTABLE)
-
-endif
 
 
 # adb host tool for device-as-host
@@ -182,6 +149,7 @@ LOCAL_SRC_FILES := \
 	transport_usb.c \
 	commandline.c \
 	adb_client.c \
+	adb_auth_host.c \
 	sockets.c \
 	services.c \
 	file_sync_client.c \
@@ -192,6 +160,7 @@ LOCAL_SRC_FILES := \
 	fdevent.c
 
 LOCAL_CFLAGS := \
+	-O2 \
 	-g \
 	-DADB_HOST=1 \
 	-DADB_HOST_ON_TARGET=1 \
@@ -200,19 +169,13 @@ LOCAL_CFLAGS := \
 	-D_XOPEN_SOURCE \
 	-D_GNU_SOURCE
 
-# adb can't be built without optimizations, so we enforce -O2 if no
-# other optimization flag is set - but we don't override what the global
-# flags are saying if something else is given (-Os or -O3 are useful)
-ifeq ($(findstring -O, $(TARGET_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
-ifneq ($(findstring -O0, $(TARGET_GLOBAL_CFLAGS)),)
-LOCAL_CFLAGS += -O2
-endif
+LOCAL_C_INCLUDES += external/openssl/include
 
 LOCAL_MODULE := adb
 
 LOCAL_STATIC_LIBRARIES := libzipfile libunz libcutils
+
+LOCAL_SHARED_LIBRARIES := libcrypto
 
 include $(BUILD_EXECUTABLE)
 endif
