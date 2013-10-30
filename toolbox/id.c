@@ -39,7 +39,6 @@ int id_main(int argc, char **argv)
 #endif
 
     max = getgroups(64, list);
-    printf("max=%d ", max);
     if (max < 0) max = 0;
 
     printf("uid=");
