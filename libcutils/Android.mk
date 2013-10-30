@@ -41,6 +41,7 @@ commonSources := \
 	load_file.c \
 	list.c \
 	open_memstream.c \
+	qsort_r_compat.c \
 	strdup16to8.c \
 	strdup8to16.c \
 	record_stream.c \
