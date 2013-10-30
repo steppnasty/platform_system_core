@@ -31,6 +31,14 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/personality.h>
+
+#ifdef HAVE_SELINUX
+#include <selinux/selinux.h>
+#include <selinux/label.h>
+#include <selinux/android.h>
+#endif
+
 #include <libgen.h>
 
 #include <cutils/list.h>
@@ -51,6 +59,12 @@
 #include "init_parser.h"
 #include "util.h"
 #include "ueventd.h"
+#include "watchdogd.h"
+
+#ifdef HAVE_SELINUX
+struct selabel_handle *sehandle;
+struct selabel_handle *sehandle_prop;
+#endif
 
 static int property_triggers_enabled = 0;
 
@@ -59,15 +73,14 @@ static int   bootchart_count;
 #endif
 
 static char console[32];
-static char serialno[32];
 static char bootmode[32];
-static char baseband[32];
-static char carrier[32];
-static char bootloader[32];
 static char hardware[32];
-static char modelno[32];
 static unsigned revision = 0;
 static char qemu[32];
+
+#ifdef HAVE_SELINUX
+static int selinux_enabled = 1;
+#endif
 
 static struct action *cur_action = NULL;
 static struct command *cur_command = NULL;
@@ -123,6 +136,7 @@ static void open_console()
     if ((fd = open(console_name, O_RDWR)) < 0) {
         fd = open("/dev/null", O_RDWR);
     }
+    ioctl(fd, TIOCSCTTY, 0);
     dup2(fd, 0);
     dup2(fd, 1);
     dup2(fd, 2);
@@ -150,12 +164,15 @@ void service_start(struct service *svc, const char *dynamic_args)
     pid_t pid;
     int needs_console;
     int n;
-
+#ifdef HAVE_SELINUX
+    char *scon = NULL;
+    int rc;
+#endif
         /* starting a service removes it from the disabled or reset
          * state and immediately takes it out of the restarting
          * state if it was in there
          */
-    svc->flags &= (~(SVC_DISABLED|SVC_RESTARTING|SVC_RESET|SVC_RESTART));
+    svc->flags &= (~(SVC_DISABLED|SVC_RESTARTING|SVC_RESET));
     svc->time_started = 0;
 
         /* running processes require no additional work -- if
@@ -187,6 +204,34 @@ void service_start(struct service *svc, const char *dynamic_args)
         return;
     }
 
+#ifdef HAVE_SELINUX
+    if (is_selinux_enabled() > 0) {
+        char *mycon = NULL, *fcon = NULL;
+
+        INFO("computing context for service '%s'\n", svc->args[0]);
+        rc = getcon(&mycon);
+        if (rc < 0) {
+            ERROR("could not get context while starting '%s'\n", svc->name);
+            return;
+        }
+
+        rc = getfilecon(svc->args[0], &fcon);
+        if (rc < 0) {
+            ERROR("could not get context while starting '%s'\n", svc->name);
+            freecon(mycon);
+            return;
+        }
+
+        rc = security_compute_create(mycon, fcon, string_to_security_class("process"), &scon);
+        freecon(mycon);
+        freecon(fcon);
+        if (rc < 0) {
+            ERROR("could not get context while starting '%s'\n", svc->name);
+            return;
+        }
+    }
+#endif
+
     NOTICE("starting '%s'\n", svc->name);
 
     pid = fork();
@@ -197,6 +242,22 @@ void service_start(struct service *svc, const char *dynamic_args)
         char tmp[32];
         int fd, sz;
 
+        umask(077);
+#ifdef __arm__
+        /*
+         * b/7188322 - Temporarily revert to the compat memory layout
+         * to avoid breaking third party apps.
+         *
+         * THIS WILL GO AWAY IN A FUTURE ANDROID RELEASE.
+         *
+         * http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff;h=7dbaa466
+         * changes the kernel mapping from bottom up to top-down.
+         * This breaks some programs which improperly embed
+         * an out of date copy of Android's linker.
+         */
+        int current = personality(0xffffFFFF);
+        personality(current | ADDR_COMPAT_LAYOUT);
+#endif
         if (properties_inited()) {
             get_property_workspace(&fd, &sz);
             sprintf(tmp, "%d,%d", dup(fd), sz);
@@ -205,6 +266,10 @@ void service_start(struct service *svc, const char *dynamic_args)
 
         for (ei = svc->envvars; ei; ei = ei->next)
             add_environment(ei->name, ei->value);
+
+#ifdef HAVE_SELINUX
+        setsockcreatecon(scon);
+#endif
 
         for (si = svc->sockets; si; si = si->next) {
             int socket_type = (
@@ -216,6 +281,12 @@ void service_start(struct service *svc, const char *dynamic_args)
                 publish_socket(si->name, s);
             }
         }
+
+#ifdef HAVE_SELINUX
+        freecon(scon);
+        scon = NULL;
+        setsockcreatecon(NULL);
+#endif
 
         if (svc->ioprio_class != IoSchedClass_NONE) {
             if (android_set_ioprio(getpid(), svc->ioprio_class, svc->ioprio_pri)) {
@@ -262,6 +333,15 @@ void service_start(struct service *svc, const char *dynamic_args)
             }
         }
 
+#ifdef HAVE_SELINUX
+        if (svc->seclabel) {
+            if (is_selinux_enabled() > 0 && setexeccon(svc->seclabel) < 0) {
+                ERROR("cannot setexeccon('%s'): %s\n", svc->seclabel, strerror(errno));
+                _exit(127);
+            }
+        }
+#endif
+
         if (!dynamic_args) {
             if (execve(svc->args[0], (char**) svc->args, (char**) ENV) < 0) {
                 ERROR("cannot execve('%s'): %s\n", svc->args[0], strerror(errno));
@@ -287,6 +367,10 @@ void service_start(struct service *svc, const char *dynamic_args)
         _exit(127);
     }
 
+#ifdef HAVE_SELINUX
+    freecon(scon);
+#endif
+
     if (pid < 0) {
         ERROR("failed to start '%s'\n", svc->name);
         svc->pid = 0;
@@ -301,15 +385,15 @@ void service_start(struct service *svc, const char *dynamic_args)
         notify_service_state(svc->name, "running");
 }
 
-/* The how field should be either SVC_DISABLED, SVC_RESET, or SVC_RESTART */
+/* The how field should be either SVC_DISABLED or SVC_RESET */
 static void service_stop_or_reset(struct service *svc, int how)
 {
         /* we are no longer running, nor should we
-         * attempt to restart (yet)
+         * attempt to restart
          */
     svc->flags &= (~(SVC_RUNNING|SVC_RESTARTING));
 
-    if ((how != SVC_DISABLED) && (how != SVC_RESET) && (how != SVC_RESTART)) {
+    if ((how != SVC_DISABLED) && (how != SVC_RESET)) {
         /* Hrm, an illegal flag.  Default to SVC_DISABLED */
         how = SVC_DISABLED;
     }
@@ -339,17 +423,6 @@ void service_reset(struct service *svc)
 void service_stop(struct service *svc)
 {
     service_stop_or_reset(svc, SVC_DISABLED);
-}
-
-void service_restart(struct service *svc)
-{
-    if (svc->flags & SVC_RUNNING) {
-        /* Stop, wait, then start the service. */
-        service_stop_or_reset(svc, SVC_RESTART);
-    } else if (!(svc->flags & SVC_RESTARTING)) {
-        /* Just start the service since it's not running. */
-        service_start(svc, NULL);
-    } /* else: Service is restarting anyways. */
 }
 
 void property_changed(const char *name, const char *value)
@@ -418,17 +491,6 @@ static void msg_stop(const char *name)
     }
 }
 
-static void msg_restart(const char *name)
-{
-    struct service *svc = service_find_by_name(name);
-
-    if (svc) {
-        service_restart(svc);
-    } else {
-        ERROR("no such service '%s'\n", name);
-    }
-}
-
 void handle_control_message(const char *msg, const char *arg)
 {
     if (!strcmp(msg,"start")) {
@@ -436,50 +498,10 @@ void handle_control_message(const char *msg, const char *arg)
     } else if (!strcmp(msg,"stop")) {
         msg_stop(arg);
     } else if (!strcmp(msg,"restart")) {
-        msg_restart(arg);
+        msg_stop(arg);
+        msg_start(arg);
     } else {
         ERROR("unknown control msg '%s'\n", msg);
-    }
-}
-
-static void import_kernel_nv(char *name, int in_qemu)
-{
-    char *value = strchr(name, '=');
-
-    if (value == 0) return;
-    *value++ = 0;
-    if (*name == 0) return;
-
-    if (!in_qemu)
-    {
-        /* on a real device, white-list the kernel options */
-        if (!strcmp(name,"qemu")) {
-            strlcpy(qemu, value, sizeof(qemu));
-        } else if (!strcmp(name,"androidboot.console")) {
-            strlcpy(console, value, sizeof(console));
-        } else if (!strcmp(name,"androidboot.mode")) {
-            strlcpy(bootmode, value, sizeof(bootmode));
-        } else if (!strcmp(name,"androidboot.serialno")) {
-            strlcpy(serialno, value, sizeof(serialno));
-        } else if (!strcmp(name,"androidboot.baseband")) {
-            strlcpy(baseband, value, sizeof(baseband));
-        } else if (!strcmp(name,"androidboot.carrier")) {
-            strlcpy(carrier, value, sizeof(carrier));
-        } else if (!strcmp(name,"androidboot.bootloader")) {
-            strlcpy(bootloader, value, sizeof(bootloader));
-        } else if (!strcmp(name,"androidboot.hardware")) {
-            strlcpy(hardware, value, sizeof(hardware));
-        } else if (!strcmp(name,"androidboot.modelno")) {
-            strlcpy(modelno, value, sizeof(modelno));
-        }
-    } else {
-        /* in the emulator, export any kernel option with the
-         * ro.kernel. prefix */
-        char  buff[32];
-        int   len = snprintf( buff, sizeof(buff), "ro.kernel.%s", name );
-        if (len < (int)sizeof(buff)) {
-            property_set( buff, value );
-        }
     }
 }
 
@@ -542,17 +564,6 @@ static int wait_for_coldboot_done_action(int nargs, char **args)
     return ret;
 }
 
-static int property_init_action(int nargs, char **args)
-{
-    bool load_defaults = true;
-
-    INFO("property init\n");
-    if (!strcmp(bootmode, "charger"))
-        load_defaults = false;
-    property_init(load_defaults);
-    return 0;
-}
-
 static int keychord_init_action(int nargs, char **args)
 {
     keychord_init();
@@ -600,33 +611,109 @@ static int console_init_action(int nargs, char **args)
     return 0;
 }
 
-static int set_init_properties_action(int nargs, char **args)
+static void import_kernel_nv(char *name, int for_emulator)
+{
+    char *value = strchr(name, '=');
+    int name_len = strlen(name);
+
+    if (value == 0) return;
+    *value++ = 0;
+    if (name_len == 0) return;
+
+#ifdef HAVE_SELINUX
+    if (!strcmp(name,"selinux")) {
+        selinux_enabled = atoi(value);
+    }
+#endif
+
+    if (for_emulator) {
+        /* in the emulator, export any kernel option with the
+         * ro.kernel. prefix */
+        char buff[PROP_NAME_MAX];
+        int len = snprintf( buff, sizeof(buff), "ro.kernel.%s", name );
+
+        if (len < (int)sizeof(buff))
+            property_set( buff, value );
+        return;
+    }
+
+    if (!strcmp(name,"qemu")) {
+        strlcpy(qemu, value, sizeof(qemu));
+    } else if (!strncmp(name, "androidboot.", 12) && name_len > 12) {
+        const char *boot_prop_name = name + 12;
+        char prop[PROP_NAME_MAX];
+        int cnt;
+
+        cnt = snprintf(prop, sizeof(prop), "ro.boot.%s", boot_prop_name);
+        if (cnt < PROP_NAME_MAX)
+            property_set(prop, value);
+    }
+}
+
+static void export_kernel_boot_props(void)
 {
     char tmp[PROP_VALUE_MAX];
+    const char *pval;
+    unsigned i;
+    struct {
+        const char *src_prop;
+        const char *dest_prop;
+        const char *def_val;
+    } prop_map[] = {
+        { "ro.boot.serialno", "ro.serialno", "", },
+        { "ro.boot.mode", "ro.bootmode", "unknown", },
+        { "ro.boot.baseband", "ro.baseband", "unknown", },
+        { "ro.boot.bootloader", "ro.bootloader", "unknown", },
+    };
 
-    if (qemu[0])
-        import_kernel_cmdline(1, import_kernel_nv);
+    for (i = 0; i < ARRAY_SIZE(prop_map); i++) {
+        pval = property_get(prop_map[i].src_prop);
+        property_set(prop_map[i].dest_prop, pval ?: prop_map[i].def_val);
+    }
 
+    pval = property_get("ro.boot.console");
+    if (pval)
+        strlcpy(console, pval, sizeof(console));
+
+    /* save a copy for init's usage during boot */
+    strlcpy(bootmode, property_get("ro.bootmode"), sizeof(bootmode));
+
+    /* if this was given on kernel command line, override what we read
+     * before (e.g. from /proc/cpuinfo), if anything */
+    pval = property_get("ro.boot.hardware");
+    if (pval)
+        strlcpy(hardware, pval, sizeof(hardware));
+    property_set("ro.hardware", hardware);
+
+    snprintf(tmp, PROP_VALUE_MAX, "%d", revision);
+    property_set("ro.revision", tmp);
+
+    /* TODO: these are obsolete. We should delete them */
     if (!strcmp(bootmode,"factory"))
         property_set("ro.factorytest", "1");
     else if (!strcmp(bootmode,"factory2"))
         property_set("ro.factorytest", "2");
     else
         property_set("ro.factorytest", "0");
+}
 
-    property_set("ro.serialno", serialno[0] ? serialno : "");
-    property_set("ro.bootmode", bootmode[0] ? bootmode : "unknown");
-    property_set("ro.baseband", baseband[0] ? baseband : "unknown");
-    property_set("ro.carrier", carrier[0] ? carrier : "unknown");
-    property_set("ro.bootloader", bootloader[0] ? bootloader : "unknown");
+static void process_kernel_cmdline(void)
+{
+    /* don't expose the raw commandline to nonpriv processes */
+    chmod("/proc/cmdline", 0440);
 
-    if (modelno[0])
-        property_set("ro.boot.modelno", modelno);
+    /* first pass does the common stuff, and finds if we are in qemu.
+     * second pass is only necessary for qemu to export all kernel params
+     * as props.
+     */
+    import_kernel_cmdline(0, import_kernel_nv);
+    if (qemu[0])
+        import_kernel_cmdline(1, import_kernel_nv);
 
-    property_set("ro.hardware", hardware);
-    snprintf(tmp, PROP_VALUE_MAX, "%d", revision);
-    property_set("ro.revision", tmp);
-    return 0;
+    /* now propogate the info given on command line to internal variables
+     * used by init as well as the current required properties
+     */
+    export_kernel_boot_props();
 }
 
 static int property_service_init_action(int nargs, char **args)
@@ -685,6 +772,67 @@ static int bootchart_init_action(int nargs, char **args)
 }
 #endif
 
+#ifdef HAVE_SELINUX
+static const struct selinux_opt seopts_prop[] = {
+        { SELABEL_OPT_PATH, "/data/system/property_contexts" },
+        { SELABEL_OPT_PATH, "/property_contexts" },
+        { 0, NULL }
+};
+
+struct selabel_handle* selinux_android_prop_context_handle(void)
+{
+    int i = 0;
+    struct selabel_handle* sehandle = NULL;
+    while ((sehandle == NULL) && seopts_prop[i].value) {
+        sehandle = selabel_open(SELABEL_CTX_ANDROID_PROP, &seopts_prop[i], 1);
+        i++;
+    }
+
+    if (!sehandle) {
+        ERROR("SELinux:  Could not load property_contexts:  %s\n",
+              strerror(errno));
+        return NULL;
+    }
+    INFO("SELinux: Loaded property contexts from %s\n", seopts_prop[i - 1].value);
+    return sehandle;
+}
+
+void selinux_init_all_handles(void)
+{
+    sehandle = selinux_android_file_context_handle();
+    sehandle_prop = selinux_android_prop_context_handle();
+}
+
+int selinux_reload_policy(void)
+{
+    if (!selinux_enabled) {
+        return -1;
+    }
+
+    INFO("SELinux: Attempting to reload policy files\n");
+
+    if (selinux_android_reload_policy() == -1) {
+        return -1;
+    }
+
+    if (sehandle)
+        selabel_close(sehandle);
+
+    if (sehandle_prop)
+        selabel_close(sehandle_prop);
+
+    selinux_init_all_handles();
+    return 0;
+}
+
+int audit_callback(void *data, security_class_t cls, char *buf, size_t len)
+{
+    snprintf(buf, len, "property=%s", !data ? "NULL" : (char *)data);
+    return 0;
+}
+
+#endif
+
 int main(int argc, char **argv)
 {
     int fd_count = 0;
@@ -695,9 +843,13 @@ int main(int argc, char **argv)
     int property_set_fd_init = 0;
     int signal_fd_init = 0;
     int keychord_fd_init = 0;
+    bool is_charger = false;
 
     if (!strcmp(basename(argv[0]), "ueventd"))
         return ueventd_main(argc, argv);
+
+    if (!strcmp(basename(argv[0]), "watchdogd"))
+        return watchdogd_main(argc, argv);
 
     /* clear the umask */
     umask(0);
@@ -728,31 +880,59 @@ int main(int argc, char **argv)
          */
     open_devnull_stdio();
     klog_init();
+    property_init();
+
+    get_hardware_name(hardware, &revision);
+
+    process_kernel_cmdline();
+
+#ifdef HAVE_SELINUX
+    union selinux_callback cb;
+    cb.func_log = klog_write;
+    selinux_set_callback(SELINUX_CB_LOG, cb);
+
+    cb.func_audit = audit_callback;
+    selinux_set_callback(SELINUX_CB_AUDIT, cb);
+
+    INFO("loading selinux policy\n");
+    if (selinux_enabled) {
+        if (selinux_android_load_policy() < 0) {
+            selinux_enabled = 0;
+            INFO("SELinux: Disabled due to failed policy load\n");
+        } else {
+            selinux_init_all_handles();
+        }
+    } else {
+        INFO("SELinux:  Disabled by command line option\n");
+    }
+    /* These directories were necessarily created before initial policy load
+     * and therefore need their security context restored to the proper value.
+     * This must happen before /dev is populated by ueventd.
+     */
+    restorecon("/dev");
+    restorecon("/dev/socket");
+#endif
+
+    is_charger = !strcmp(bootmode, "charger");
+
+    INFO("property init\n");
+    if (!is_charger)
+        property_load_boot_defaults();
 
     INFO("reading config file\n");
     init_parse_config_file("/init.rc");
 
-    /* pull the kernel commandline and ramdisk properties file in */
-    import_kernel_cmdline(0, import_kernel_nv);
-    /* don't expose the raw commandline to nonpriv processes */
-    chmod("/proc/cmdline", 0440);
-    get_hardware_name(hardware, &revision);
-    snprintf(tmp, sizeof(tmp), "/init.%s.rc", hardware);
-    init_parse_config_file(tmp);
-
     action_for_each_trigger("early-init", action_add_queue_tail);
 
     queue_builtin_action(wait_for_coldboot_done_action, "wait_for_coldboot_done");
-    queue_builtin_action(property_init_action, "property_init");
     queue_builtin_action(keychord_init_action, "keychord_init");
     queue_builtin_action(console_init_action, "console_init");
-    queue_builtin_action(set_init_properties_action, "set_init_properties");
 
     /* execute all the boot actions to get us started */
     action_for_each_trigger("init", action_add_queue_tail);
 
     /* skip mounting filesystems in charger mode */
-    if (strcmp(bootmode, "charger") != 0) {
+    if (!is_charger) {
         action_for_each_trigger("early-fs", action_add_queue_tail);
         action_for_each_trigger("fs", action_add_queue_tail);
         action_for_each_trigger("post-fs", action_add_queue_tail);
@@ -763,7 +943,7 @@ int main(int argc, char **argv)
     queue_builtin_action(signal_init_action, "signal_init");
     queue_builtin_action(check_startup_action, "check_startup");
 
-    if (!strcmp(bootmode, "charger")) {
+    if (is_charger) {
         action_for_each_trigger("charger", action_add_queue_tail);
     } else {
         action_for_each_trigger("early-boot", action_add_queue_tail);

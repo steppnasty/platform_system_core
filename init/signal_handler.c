@@ -90,7 +90,7 @@ static int wait_for_one_process(int block)
     }
 
     now = gettime();
-    if ((svc->flags & SVC_CRITICAL) && !(svc->flags & SVC_RESTART)) {
+    if (svc->flags & SVC_CRITICAL) {
         if (svc->time_crashed + CRITICAL_CRASH_WINDOW >= now) {
             if (++svc->nr_crashed > CRITICAL_CRASH_THRESHOLD) {
                 ERROR("critical process '%s' exited %d times in %d minutes; "
@@ -105,7 +105,6 @@ static int wait_for_one_process(int block)
         }
     }
 
-    svc->flags &= (~SVC_RESTART);
     svc->flags |= SVC_RESTARTING;
 
     /* Execute all onrestart commands for this service. */
@@ -132,11 +131,9 @@ void signal_init(void)
     int s[2];
 
     struct sigaction act;
-
+    memset(&act, 0, sizeof(act));
     act.sa_handler = sigchld_handler;
     act.sa_flags = SA_NOCLDSTOP;
-    act.sa_mask = 0;
-    act.sa_restorer = NULL;
     sigaction(SIGCHLD, &act, 0);
 
     /* create a signalling mechanism for the sigchld handler */

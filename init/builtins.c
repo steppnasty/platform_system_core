@@ -23,15 +23,22 @@
 #include <linux/kd.h>
 #include <errno.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <netinet/in.h>
 #include <linux/if.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <linux/loop.h>
 #include <cutils/partition_utils.h>
+#include <sys/system_properties.h>
+#include <fs_mgr.h>
+
+#ifdef HAVE_SELINUX
+#include <selinux/selinux.h>
+#include <selinux/label.h>
+#endif
 
 #include "init.h"
 #include "keywords.h"
@@ -232,42 +239,9 @@ int do_domainname(int nargs, char **args)
     return write_file("/proc/sys/kernel/domainname", args[1]);
 }
 
-/*exec <path> <arg1> <arg2> ... */
-#define MAX_PARAMETERS 64
 int do_exec(int nargs, char **args)
 {
-    pid_t pid;
-    int status, i, j;
-    char *par[MAX_PARAMETERS];
-    if (nargs > MAX_PARAMETERS)
-    {
-        return -1;
-    }
-    for(i=0, j=1; i<(nargs-1) ;i++,j++)
-    {
-        par[i] = args[j];
-    }
-    par[i] = (char*)0;
-    pid = fork();
-    if (!pid)
-    {
-        char tmp[32];
-        int fd, sz;
-        get_property_workspace(&fd, &sz);
-        sprintf(tmp, "%d,%d", dup(fd), sz);
-        setenv("ANDROID_PROPERTY_WORKSPACE", tmp, 1);
-        execve(par[0],par,environ);
-        exit(0);
-    }
-    else
-    {
-        waitpid(pid, &status, 0);
-        if (WEXITSTATUS(status) != 0) {
-            ERROR("exec: pid %1d exited with return code %d: %s", (int)pid, WEXITSTATUS(status), strerror(status));
-        }
-
-    }
-    return 0;
+    return -1;
 }
 
 int do_export(int nargs, char **args)
@@ -328,7 +302,7 @@ int do_mkdir(int nargs, char **args)
         mode = strtoul(args[2], 0, 8);
     }
 
-    ret = mkdir(args[1], mode);
+    ret = make_dir(args[1], mode);
     /* chmod in case the directory already exists */
     if (ret == -1 && errno == EEXIST) {
         ret = _chmod(args[1], mode);
@@ -348,6 +322,14 @@ int do_mkdir(int nargs, char **args)
         if (_chown(args[1], uid, gid) < 0) {
             return -errno;
         }
+
+        /* chown may have cleared S_ISUID and S_ISGID, chmod again */
+        if (mode & (S_ISUID | S_ISGID)) {
+            ret = _chmod(args[1], mode);
+            if (ret == -1) {
+                return -errno;
+            }
+        }
     }
 
     return 0;
@@ -365,6 +347,12 @@ static struct {
     { "ro",         MS_RDONLY },
     { "rw",         0 },
     { "remount",    MS_REMOUNT },
+    { "bind",       MS_BIND },
+    { "rec",        MS_REC },
+    { "unbindable", MS_UNBINDABLE },
+    { "private",    MS_PRIVATE },
+    { "slave",      MS_SLAVE },
+    { "shared",     MS_SHARED },
     { "defaults",   0 },
     { 0,            0 },
 };
@@ -461,70 +449,91 @@ int do_mount(int nargs, char **args)
         if (wait)
             wait_for_file(source, COMMAND_RETRY_TIMEOUT);
         if (mount(source, target, system, flags, options) < 0) {
-            /* If this fails, it may be an encrypted filesystem
-             * or it could just be wiped.  If wiped, that will be
-             * handled later in the boot process.
-             * We only support encrypting /data.  Check
-             * if we're trying to mount it, and if so,
-             * assume it's encrypted, mount a tmpfs instead.
-             * Then save the orig mount parms in properties
-             * for vold to query when it mounts the real
-             * encrypted /data.
-             */
-            if (!strcmp(target, DATA_MNT_POINT) && !partition_wiped(source)) {
-                const char *tmpfs_options;
-
-                tmpfs_options = property_get("ro.crypto.tmpfs_options");
-
-                if (mount("tmpfs", target, "tmpfs", MS_NOATIME | MS_NOSUID | MS_NODEV,
-                    tmpfs_options) < 0) {
-                    return -1;
-                }
-
-                /* Set the property that triggers the framework to do a minimal
-                 * startup and ask the user for a password
-                 */
-                property_set("ro.crypto.state", "encrypted");
-                property_set("vold.decrypt", "1");
-            } else {
-                return -1;
-            }
+            return -1;
         }
 
-        if (!strcmp(target, DATA_MNT_POINT)) {
-            char fs_flags[32];
-
-            /* Save the original mount options */
-            property_set("ro.crypto.fs_type", system);
-            property_set("ro.crypto.fs_real_blkdev", source);
-            property_set("ro.crypto.fs_mnt_point", target);
-            if (options) {
-                property_set("ro.crypto.fs_options", options);
-            }
-            snprintf(fs_flags, sizeof(fs_flags), "0x%8.8x", flags);
-            property_set("ro.crypto.fs_flags", fs_flags);
-        }
     }
 
 exit_success:
-    /* If not running encrypted, then set the property saying we are
-     * unencrypted, and also trigger the action for a nonencrypted system.
-     */
-    if (!strcmp(target, DATA_MNT_POINT)) {
-        const char *prop;
-
-        prop = property_get("ro.crypto.state");
-        if (! prop) {
-            prop = "notset";
-        }
-        if (strcmp(prop, "encrypted")) {
-            property_set("ro.crypto.state", "unencrypted");
-            action_for_each_trigger("nonencrypted", action_add_queue_tail);
-        }
-    }
-
     return 0;
 
+}
+
+int do_mount_all(int nargs, char **args)
+{
+    pid_t pid;
+    int ret = -1;
+    int child_ret = -1;
+    int status;
+    const char *prop;
+
+    if (nargs != 2) {
+        return -1;
+    }
+
+    /*
+     * Call fs_mgr_mount_all() to mount all filesystems.  We fork(2) and
+     * do the call in the child to provide protection to the main init
+     * process if anything goes wrong (crash or memory leak), and wait for
+     * the child to finish in the parent.
+     */
+    pid = fork();
+    if (pid > 0) {
+        /* Parent.  Wait for the child to return */
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            ret = WEXITSTATUS(status);
+        } else {
+            ret = -1;
+        }
+    } else if (pid == 0) {
+        /* child, call fs_mgr_mount_all() */
+        klog_set_level(6);  /* So we can see what fs_mgr_mount_all() does */
+        child_ret = fs_mgr_mount_all(args[1]);
+        if (child_ret == -1) {
+            ERROR("fs_mgr_mount_all returned an error\n");
+        }
+        exit(child_ret);
+    } else {
+        /* fork failed, return an error */
+        return -1;
+    }
+
+    /* ret is 1 if the device is encrypted, 0 if not, and -1 on error */
+    if (ret == 1) {
+        property_set("ro.crypto.state", "encrypted");
+        property_set("vold.decrypt", "1");
+    } else if (ret == 0) {
+        property_set("ro.crypto.state", "unencrypted");
+        /* If fs_mgr determined this is an unencrypted device, then trigger
+         * that action.
+         */
+        action_for_each_trigger("nonencrypted", action_add_queue_tail);
+    }
+
+    return ret;
+}
+
+int do_setcon(int nargs, char **args) {
+#ifdef HAVE_SELINUX
+    if (is_selinux_enabled() <= 0)
+        return 0;
+    if (setcon(args[1]) < 0) {
+        return -errno;
+    }
+#endif
+    return 0;
+}
+
+int do_setenforce(int nargs, char **args) {
+#ifdef HAVE_SELINUX
+    if (is_selinux_enabled() <= 0)
+        return 0;
+    if (security_setenforce(atoi(args[1])) < 0) {
+        return -errno;
+    }
+#endif
+    return 0;
 }
 
 int do_setkey(int nargs, char **args)
@@ -540,22 +549,15 @@ int do_setprop(int nargs, char **args)
 {
     const char *name = args[1];
     const char *value = args[2];
+    char prop_val[PROP_VALUE_MAX];
+    int ret;
 
-    if (value[0] == '$') {
-        /* Use the value of a system property if value starts with '$' */
-        value++;
-        if (value[0] != '$') {
-            value = property_get(value);
-            if (!value) {
-                ERROR("property %s has no value for assigning to %s\n", value, name);
-                return -EINVAL;
-            }
-        } /* else fall through to support double '$' prefix for setting properties
-           * to string literals that start with '$'
-           */
+    ret = expand_props(prop_val, value, sizeof(prop_val));
+    if (ret) {
+        ERROR("cannot expand '%s' while assigning to '%s'\n", value, name);
+        return -EINVAL;
     }
-
-    property_set(name, value);
+    property_set(name, prop_val);
     return 0;
 }
 
@@ -594,7 +596,8 @@ int do_restart(int nargs, char **args)
     struct service *svc;
     svc = service_find_by_name(args[1]);
     if (svc) {
-        service_restart(svc);
+        service_stop(svc);
+        service_start(svc, NULL);
     }
     return 0;
 }
@@ -638,21 +641,15 @@ int do_write(int nargs, char **args)
 {
     const char *path = args[1];
     const char *value = args[2];
-    if (value[0] == '$') {
-        /* Write the value of a system property if value starts with '$' */
-        value++;
-        if (value[0] != '$') {
-            value = property_get(value);
-            if (!value) {
-                ERROR("property %s has no value for writing to %s\n", value, path);
-                return -EINVAL;
-            }
-        } /* else fall through to support double '$' prefix for writing
-           * string literals that start with '$'
-           */
-    }
+    char prop_val[PROP_VALUE_MAX];
+    int ret;
 
-    return write_file(path, value);
+    ret = expand_props(prop_val, value, sizeof(prop_val));
+    if (ret) {
+        ERROR("cannot expand '%s' while writing to '%s'\n", value, path);
+        return -EINVAL;
+    }
+    return write_file(path, prop_val);
 }
 
 int do_copy(int nargs, char **args)
@@ -752,6 +749,50 @@ int do_chmod(int nargs, char **args) {
     return 0;
 }
 
+int do_restorecon(int nargs, char **args) {
+    int i;
+
+    for (i = 1; i < nargs; i++) {
+        if (restorecon(args[i]) < 0)
+            return -errno;
+    }
+    return 0;
+}
+
+int do_setsebool(int nargs, char **args) {
+#ifdef HAVE_SELINUX
+    SELboolean *b = alloca(nargs * sizeof(SELboolean));
+    char *v;
+    int i;
+
+    if (is_selinux_enabled() <= 0)
+        return 0;
+
+    for (i = 1; i < nargs; i++) {
+        char *name = args[i];
+        v = strchr(name, '=');
+        if (!v) {
+            ERROR("setsebool: argument %s had no =\n", name);
+            return -EINVAL;
+        }
+        *v++ = 0;
+        b[i-1].name = name;
+        if (!strcmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on"))
+            b[i-1].value = 1;
+        else if (!strcmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off"))
+            b[i-1].value = 0;
+        else {
+            ERROR("setsebool: invalid value %s\n", v);
+            return -EINVAL;
+        }
+    }
+
+    if (security_set_boolean_list(nargs - 1, b, 0) < 0)
+        return -errno;
+#endif
+    return 0;
+}
+
 int do_loglevel(int nargs, char **args) {
     if (nargs == 2) {
         klog_set_level(atoi(args[1]));
@@ -772,6 +813,8 @@ int do_wait(int nargs, char **args)
 {
     if (nargs == 2) {
         return wait_for_file(args[1], COMMAND_RETRY_TIMEOUT);
-    }
-    return -1;
+    } else if (nargs == 3) {
+        return wait_for_file(args[1], atoi(args[2]));
+    } else
+        return -1;
 }

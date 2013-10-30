@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,28 +14,9 @@
  * limitations under the License.
  */
 
-#ifndef PARSER_H_
-#define PARSER_H_
+#ifndef _INIT_WATCHDOGD_H_
+#define _INIT_WATCHDOGD_H_
 
-#define T_EOF 0
-#define T_TEXT 1
-#define T_NEWLINE 2
+int watchdogd_main(int argc, char **argv);
 
-struct parse_state
-{
-    char *ptr;
-    char *text;
-    int line;
-    int nexttoken;
-    void *context;
-    void (*parse_line)(struct parse_state *state, int nargs, char **args);
-    const char *filename;
-    void *priv;
-};
-
-int lookup_keyword(const char *s);
-void DUMP(void);
-int next_token(struct parse_state *state);
-void parse_error(struct parse_state *state, const char *fmt, ...);
-
-#endif /* PARSER_H_ */
+#endif

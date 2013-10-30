@@ -40,6 +40,11 @@
 #include <sys/atomics.h>
 #include <private/android_filesystem_config.h>
 
+#ifdef HAVE_SELINUX
+#include <selinux/selinux.h>
+#include <selinux/label.h>
+#endif
+
 #include "property_service.h"
 #include "init.h"
 #include "util.h"
@@ -58,7 +63,7 @@ struct {
     unsigned int uid;
     unsigned int gid;
 } property_perms[] = {
-    { "net.rmnet",        AID_RADIO,    0 },
+    { "net.rmnet0.",      AID_RADIO,    0 },
     { "net.gprs.",        AID_RADIO,    0 },
     { "net.ppp",          AID_RADIO,    0 },
     { "net.qmi",          AID_RADIO,    0 },
@@ -76,8 +81,10 @@ struct {
     { "sys.",             AID_SYSTEM,   0 },
     { "service.",         AID_SYSTEM,   0 },
     { "wlan.",            AID_SYSTEM,   0 },
+    { "bluetooth.",       AID_BLUETOOTH,   0 },
     { "dhcp.",            AID_SYSTEM,   0 },
     { "dhcp.",            AID_DHCP,     0 },
+    { "debug.",           AID_SYSTEM,   0 },
     { "debug.",           AID_SHELL,    0 },
     { "log.",             AID_SHELL,    0 },
     { "service.adb.root", AID_SHELL,    0 },
@@ -85,6 +92,8 @@ struct {
     { "persist.sys.",     AID_SYSTEM,   0 },
     { "persist.service.", AID_SYSTEM,   0 },
     { "persist.security.", AID_SYSTEM,   0 },
+    { "persist.service.bdroid.", AID_BLUETOOTH,   0 },
+    { "selinux."         , AID_SYSTEM,   0 },
     { NULL, 0, 0 }
 };
 
@@ -145,12 +154,12 @@ out:
     return -1;
 }
 
-/* (8 header words + 372 toc words) = 1520 bytes */
-/* 1536 bytes header and toc + 372 prop_infos @ 128 bytes = 49152 bytes */
+/* (8 header words + 247 toc words) = 1020 bytes */
+/* 1024 bytes header and toc + 247 prop_infos @ 128 bytes = 32640 bytes */
 
-#define PA_COUNT_MAX  372
-#define PA_INFO_START 1536
-#define PA_SIZE       49152
+#define PA_COUNT_MAX  247
+#define PA_INFO_START 1024
+#define PA_SIZE       32768
 
 static workspace pa_workspace;
 static prop_info *pa_info_array;
@@ -190,23 +199,77 @@ static void update_prop_info(prop_info *pi, const char *value, unsigned len)
     __futex_wake(&pi->serial, INT32_MAX);
 }
 
+static int check_mac_perms(const char *name, char *sctx)
+{
+#ifdef HAVE_SELINUX
+    if (is_selinux_enabled() <= 0)
+        return 1;
+
+    char *tctx = NULL;
+    const char *class = "property_service";
+    const char *perm = "set";
+    int result = 0;
+
+    if (!sctx)
+        goto err;
+
+    if (!sehandle_prop)
+        goto err;
+
+    if (selabel_lookup(sehandle_prop, &tctx, name, 1) != 0)
+        goto err;
+
+    if (selinux_check_access(sctx, tctx, class, perm, name) == 0)
+        result = 1;
+
+    freecon(tctx);
+ err:
+    return result;
+
+#endif
+    return 1;
+}
+
+static int check_control_mac_perms(const char *name, char *sctx)
+{
+#ifdef HAVE_SELINUX
+
+    /*
+     *  Create a name prefix out of ctl.<service name>
+     *  The new prefix allows the use of the existing
+     *  property service backend labeling while avoiding
+     *  mislabels based on true property prefixes.
+     */
+    char ctl_name[PROP_VALUE_MAX+4];
+    int ret = snprintf(ctl_name, sizeof(ctl_name), "ctl.%s", name);
+
+    if (ret < 0 || (size_t) ret >= sizeof(ctl_name))
+        return 0;
+
+    return check_mac_perms(ctl_name, sctx);
+
+#endif
+    return 1;
+}
+
 /*
  * Checks permissions for starting/stoping system services.
  * AID_SYSTEM and AID_ROOT are always allowed.
  *
  * Returns 1 if uid allowed, 0 otherwise.
  */
-static int check_control_perms(const char *name, unsigned int uid, unsigned int gid) {
+static int check_control_perms(const char *name, unsigned int uid, unsigned int gid, char *sctx) {
+
     int i;
     if (uid == AID_SYSTEM || uid == AID_ROOT)
-        return 1;
+      return check_control_mac_perms(name, sctx);
 
     /* Search the ACL */
     for (i = 0; control_perms[i].service; i++) {
         if (strcmp(control_perms[i].service, name) == 0) {
             if ((uid && control_perms[i].uid == uid) ||
                 (gid && control_perms[i].gid == gid)) {
-                return 1;
+                return check_control_mac_perms(name, sctx);
             }
         }
     }
@@ -217,22 +280,22 @@ static int check_control_perms(const char *name, unsigned int uid, unsigned int 
  * Checks permissions for setting system properties.
  * Returns 1 if uid allowed, 0 otherwise.
  */
-static int check_perms(const char *name, unsigned int uid, unsigned int gid)
+static int check_perms(const char *name, unsigned int uid, unsigned int gid, char *sctx)
 {
     int i;
-    if (uid == 0)
-        return 1;
-
     if(!strncmp(name, "ro.", 3))
         name +=3;
 
+    if (uid == 0)
+        return check_mac_perms(name, sctx);
+
     for (i = 0; property_perms[i].prefix; i++) {
-        int tmp;
         if (strncmp(property_perms[i].prefix, name,
                     strlen(property_perms[i].prefix)) == 0) {
             if ((uid && property_perms[i].uid == uid) ||
                 (gid && property_perms[i].gid == gid)) {
-                return 1;
+
+                return check_mac_perms(name, sctx);
             }
         }
     }
@@ -333,23 +396,13 @@ int property_set(const char *name, const char *value)
          * to prevent them from being overwritten by default values.
          */
         write_persistent_property(name, value);
+#ifdef HAVE_SELINUX
+    } else if (strcmp("selinux.reload_policy", name) == 0 &&
+               strcmp("1", value) == 0) {
+        selinux_reload_policy();
+#endif
     }
     property_changed(name, value);
-    return 0;
-}
-
-static int property_list(void (*propfn)(const char *key, const char *value, void *cookie),
-                  void *cookie)
-{
-    char name[PROP_NAME_MAX];
-    char value[PROP_VALUE_MAX];
-    const prop_info *pi;
-    unsigned n;
-
-    for(n = 0; (pi = __system_property_find_nth(n)); n++) {
-        __system_property_read(pi, name, value);
-        propfn(name, value, cookie);
-    }
     return 0;
 }
 
@@ -363,6 +416,7 @@ void handle_property_set_fd()
     struct sockaddr_un addr;
     socklen_t addr_size = sizeof(addr);
     socklen_t cr_size = sizeof(cr);
+    char * source_ctx = NULL;
 
     if ((s = accept(property_set_fd, (struct sockaddr *) &addr, &addr_size)) < 0) {
         return;
@@ -388,18 +442,22 @@ void handle_property_set_fd()
         msg.name[PROP_NAME_MAX-1] = 0;
         msg.value[PROP_VALUE_MAX-1] = 0;
 
+#ifdef HAVE_SELINUX
+        getpeercon(s, &source_ctx);
+#endif
+
         if(memcmp(msg.name,"ctl.",4) == 0) {
             // Keep the old close-socket-early behavior when handling
             // ctl.* properties.
             close(s);
-            if (check_control_perms(msg.value, cr.uid, cr.gid)) {
+            if (check_control_perms(msg.value, cr.uid, cr.gid, source_ctx)) {
                 handle_control_message((char*) msg.name + 4, (char*) msg.value);
             } else {
                 ERROR("sys_prop: Unable to %s service ctl [%s] uid:%d gid:%d pid:%d\n",
                         msg.name + 4, msg.value, cr.uid, cr.gid, cr.pid);
             }
         } else {
-            if (check_perms(msg.name, cr.uid, cr.gid)) {
+            if (check_perms(msg.name, cr.uid, cr.gid, source_ctx)) {
                 property_set((char*) msg.name, (char*) msg.value);
             } else {
                 ERROR("sys_prop: permission denied uid:%d  name:%s\n",
@@ -411,6 +469,10 @@ void handle_property_set_fd()
             // the property is written to memory.
             close(s);
         }
+#ifdef HAVE_SELINUX
+        freecon(source_ctx);
+#endif
+
         break;
 
     default:
@@ -505,17 +567,30 @@ static void load_persistent_properties()
     persistent_properties_loaded = 1;
 }
 
-void property_init(bool load_defaults)
+void property_init(void)
 {
     init_property_area();
-    if (load_defaults)
-        load_properties_from_file(PROP_PATH_RAMDISK_DEFAULT);
+}
+
+void property_load_boot_defaults(void)
+{
+    load_properties_from_file(PROP_PATH_RAMDISK_DEFAULT);
 }
 
 int properties_inited(void)
 {
     return property_area_inited;
 }
+
+static void load_override_properties() {
+#ifdef ALLOW_LOCAL_PROP_OVERRIDE
+    const char *debuggable = property_get("ro.debuggable");
+    if (debuggable && (strcmp(debuggable, "1") == 0)) {
+        load_properties_from_file(PROP_PATH_LOCAL_OVERRIDE);
+    }
+#endif /* ALLOW_LOCAL_PROP_OVERRIDE */
+}
+
 
 /* When booting an encrypted system, /data is not mounted when the
  * property service is started, so any properties stored there are
@@ -524,7 +599,7 @@ int properties_inited(void)
  */
 void load_persist_props(void)
 {
-    load_properties_from_file(PROP_PATH_LOCAL_OVERRIDE);
+    load_override_properties();
     /* Read persistent properties after all default values have been loaded. */
     load_persistent_properties();
 }
@@ -535,7 +610,7 @@ void start_property_service(void)
 
     load_properties_from_file(PROP_PATH_SYSTEM_BUILD);
     load_properties_from_file(PROP_PATH_SYSTEM_DEFAULT);
-    load_properties_from_file(PROP_PATH_LOCAL_OVERRIDE);
+    load_override_properties();
     /* Read persistent properties after all default values have been loaded. */
     load_persistent_properties();
 
