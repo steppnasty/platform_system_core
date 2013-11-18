@@ -282,6 +282,15 @@ enum {
     NATIVE_WINDOW_SCALING_MODE_FREEZE           = 0,
     /* the buffer is scaled in both dimensions to match the window size */
     NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW  = 1,
+    /* the buffer is scaled uniformly such that the smaller dimension
+     * of the buffer matches the window size (cropping in the process)
+     */
+    NATIVE_WINDOW_SCALING_MODE_SCALE_CROP       = 2,
+    /* the window is clipped to the size of the buffer's crop rectangle; pixels
+     * outside the crop rectangle are treated as if they are completely
+     * transparent.
+     */
+    NATIVE_WINDOW_SCALING_MODE_NO_SCALE_CROP    = 3,
 };
 
 /* values returned by the NATIVE_WINDOW_CONCRETE_TYPE query */
@@ -633,6 +642,16 @@ static inline int native_window_api_disconnect(
     return window->perform(window, NATIVE_WINDOW_API_DISCONNECT, api);
 }
 
+/*
+ * native_window_dequeue_buffer_and_wait(...)
+ * Dequeue a buffer and wait on the fence associated with that buffer.  The
+ * buffer may safely be accessed immediately upon this function returning.  An
+ * error is returned if either of the dequeue or the wait operations fail.
+ */
+static inline int native_window_dequeue_buffer_and_wait(ANativeWindow *anw,
+        struct ANativeWindowBuffer** anb) {
+    return anw->dequeueBuffer(anw, anb);
+}
 
 __END_DECLS
 
