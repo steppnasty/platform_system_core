@@ -16,7 +16,7 @@
 #ifndef __FRAMEWORK_CMD_HANDLER_H
 #define __FRAMEWORK_CMD_HANDLER_H
 
-#include "../../../frameworks/base/include/utils/List.h"
+#include "../../../frameworks/native/include/utils/List.h"
 
 class SocketClient;
 

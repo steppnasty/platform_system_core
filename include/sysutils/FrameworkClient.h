@@ -1,7 +1,7 @@
 #ifndef _FRAMEWORK_CLIENT_H
 #define _FRAMEWORK_CLIENT_H
 
-#include "../../../frameworks/base/include/utils/List.h"
+#include "../../../frameworks/native/include/utils/List.h"
 
 #include <pthread.h>
 
