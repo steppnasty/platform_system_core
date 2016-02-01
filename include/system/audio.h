@@ -441,7 +441,8 @@ typedef enum {
 
 static inline bool audio_is_output_device(audio_devices_t device)
 {
-    if ((popcount(device) == 1) && ((device & ~AUDIO_DEVICE_OUT_ALL) == 0))
+    if (((device & AUDIO_DEVICE_BIT_IN) == 0) &&
+            (popcount(device) == 1) && ((device & ~AUDIO_DEVICE_OUT_ALL) == 0))
         return true;
     else
         return false;
@@ -449,10 +450,12 @@ static inline bool audio_is_output_device(audio_devices_t device)
 
 static inline bool audio_is_input_device(audio_devices_t device)
 {
-    if ((popcount(device) == 1) && ((device & ~AUDIO_DEVICE_IN_ALL) == 0))
-        return true;
-    else
-        return false;
+    if ((device & AUDIO_DEVICE_BIT_IN) != 0) {
+        device &= ~AUDIO_DEVICE_BIT_IN;
+        if ((popcount(device) == 1) && ((device & ~AUDIO_DEVICE_IN_ALL) == 0))
+            return true;
+    }
+    return false;
 }
 
 static inline bool audio_is_output_devices(audio_devices_t device)
@@ -470,6 +473,7 @@ static inline bool audio_is_a2dp_device(audio_devices_t device)
 
 static inline bool audio_is_bluetooth_sco_device(audio_devices_t device)
 {
+    device &= ~AUDIO_DEVICE_BIT_IN;
     if ((popcount(device) == 1) && (device & (AUDIO_DEVICE_OUT_ALL_SCO |
                    AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET)))
         return true;
