@@ -29,7 +29,24 @@
 /**
  * Like recv(), but checks that messages actually originate from the kernel.
  */
-ssize_t uevent_kernel_multicast_recv(int socket, void *buffer, size_t length) {
+ssize_t uevent_kernel_multicast_recv(int socket, void *buffer, size_t length)
+{
+    uid_t user = -1;
+    return uevent_kernel_multicast_uid_recv(socket, buffer, length, &user);
+}
+
+/**
+ * Like the above, but passes a uid_t in by reference. In the event that this
+ * fails due to a bad uid check, the uid_t will be set to the uid of the
+ * socket's peer.
+ *
+ * If this method rejects a netlink message from outside the kernel, it
+ * returns -1, sets errno to EIO, and sets "user" to the UID associated with the
+ * message. If the peer UID cannot be determined, "user" is set to -1."
+ */
+ssize_t uevent_kernel_multicast_uid_recv(int socket, void *buffer,
+                                         size_t length, uid_t *user)
+{
     struct iovec iov = { buffer, length };
     struct sockaddr_nl addr;
     char control[CMSG_SPACE(sizeof(struct ucred))];
@@ -43,14 +60,10 @@ ssize_t uevent_kernel_multicast_recv(int socket, void *buffer, size_t length) {
         0,
     };
 
+    *user = -1;
     ssize_t n = recvmsg(socket, &hdr, 0);
     if (n <= 0) {
         return n;
-    }
-
-    if (addr.nl_groups == 0 || addr.nl_pid != 0) {
-        /* ignoring non-kernel or unicast netlink message */
-        goto out;
     }
 
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&hdr);
@@ -60,8 +73,14 @@ ssize_t uevent_kernel_multicast_recv(int socket, void *buffer, size_t length) {
     }
 
     struct ucred *cred = (struct ucred *)CMSG_DATA(cmsg);
+    *user = cred->uid;
     if (cred->uid != 0) {
         /* ignoring netlink message from non-root user */
+        goto out;
+    }
+
+    if (addr.nl_groups == 0 || addr.nl_pid != 0) {
+        /* ignoring non-kernel or unicast netlink message */
         goto out;
     }
 
@@ -76,17 +95,14 @@ out:
 
 int uevent_open_socket(int buf_sz, bool passcred)
 {
-    union {
-        struct sockaddr_nl nl;
-        struct sockaddr generic;
-    } addr;
+    struct sockaddr_nl addr;
     int on = passcred;
     int s;
 
-    memset(&addr.nl, 0, sizeof(addr.nl));
-    addr.nl.nl_family = AF_NETLINK;
-    addr.nl.nl_pid = getpid();
-    addr.nl.nl_groups = 0xffffffff;
+    memset(&addr, 0, sizeof(addr));
+    addr.nl_family = AF_NETLINK;
+    addr.nl_pid = getpid();
+    addr.nl_groups = 0xffffffff;
 
     s = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_KOBJECT_UEVENT);
     if(s < 0)
@@ -95,7 +111,7 @@ int uevent_open_socket(int buf_sz, bool passcred)
     setsockopt(s, SOL_SOCKET, SO_RCVBUFFORCE, &buf_sz, sizeof(buf_sz));
     setsockopt(s, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
 
-    if(bind(s, &addr.generic, sizeof(addr.nl)) < 0) {
+    if(bind(s, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
         close(s);
         return -1;
     }

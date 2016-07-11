@@ -141,23 +141,13 @@ int __android_log_write(int prio, const char *tag, const char *msg)
     /* XXX: This needs to go! */
     if (!strcmp(tag, "HTC_RIL") ||
         !strncmp(tag, "RIL", 3) || /* Any log tag with "RIL" as the prefix */
+        !strncmp(tag, "IMS", 3) || /* Any log tag with "IMS" as the prefix */
         !strcmp(tag, "AT") ||
         !strcmp(tag, "GSM") ||
         !strcmp(tag, "STK") ||
         !strcmp(tag, "CDMA") ||
         !strcmp(tag, "PHONE") ||
-        !strcmp(tag, "SMS") ||
-        !strcmp(tag, "KINETO") ||
-        !strncmp(tag, "KIPC", 4) ||
-        !strncmp(tag, "Kineto", 6) ||
-        !strncmp(tag, "QCRIL", 5) ||
-        !strncmp(tag, "QC-RIL", 6) ||
-        !strncmp(tag, "QC-QMI", 6) ||
-        !strncmp(tag, "QC-ONCRPC", 9) ||
-        !strncmp(tag, "QC-DSI", 6) ||
-        !strcmp(tag, "QC-NETMGR-LIB") ||
-        !strcmp(tag, "QC-QDP")
-        )
+        !strcmp(tag, "SMS"))
             log_id = LOG_ID_RADIO;
 
     vec[0].iov_base   = (unsigned char *) &prio;
@@ -180,21 +170,13 @@ int __android_log_buf_write(int bufID, int prio, const char *tag, const char *ms
     /* XXX: This needs to go! */
     if (!strcmp(tag, "HTC_RIL") ||
         !strncmp(tag, "RIL", 3) || /* Any log tag with "RIL" as the prefix */
+        !strncmp(tag, "IMS", 3) || /* Any log tag with "IMS" as the prefix */
         !strcmp(tag, "AT") ||
         !strcmp(tag, "GSM") ||
         !strcmp(tag, "STK") ||
         !strcmp(tag, "CDMA") ||
         !strcmp(tag, "PHONE") ||
-        !strcmp(tag, "SMS") ||
-        !strcmp(tag, "KINETO") ||
-        !strncmp(tag, "KIPC", 4) ||
-        !strncmp(tag, "Kineto", 6) ||
-        !strncmp(tag, "QCRIL", 5) ||
-        !strncmp(tag, "QC-RIL", 6) ||
-        !strncmp(tag, "QC-QMI", 6) ||
-        !strncmp(tag, "QC-ONCRPC", 9) ||
-        !strncmp(tag, "QC-DSI", 6)
-        )
+        !strcmp(tag, "SMS"))
             bufID = LOG_ID_RADIO;
 
     vec[0].iov_base   = (unsigned char *) &prio;

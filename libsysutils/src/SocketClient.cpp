@@ -129,6 +129,7 @@ char *SocketClient::quoteArg(const char *arg) {
     return result;
 }
 
+
 int SocketClient::sendMsg(const char *msg) {
     // Send the message including null character
     if (sendData(msg, strlen(msg) + 1) != 0) {
@@ -138,7 +139,7 @@ int SocketClient::sendMsg(const char *msg) {
     return 0;
 }
 
-int SocketClient::sendData(const void* data, int len) {
+int SocketClient::sendData(const void *data, int len) {
 
     pthread_mutex_lock(&mWriteMutex);
     int rc = sendDataLocked(data, len);

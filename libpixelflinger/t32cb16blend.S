@@ -19,7 +19,6 @@
 	.text
 	.align
 	
-	.hidden scanline_t32cb16blend_arm
 	.global scanline_t32cb16blend_arm
 
 

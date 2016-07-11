@@ -109,7 +109,6 @@ struct {
 } control_perms[] = {
     { "dumpstate",AID_SHELL, AID_LOG },
     { "ril-daemon",AID_RADIO, AID_RADIO },
-    { "qcamerasvr", AID_MEDIA, AID_MEDIA },
      {NULL, 0, 0 }
 };
 

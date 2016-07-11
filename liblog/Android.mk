@@ -54,6 +54,7 @@ LOCAL_MODULE := liblog
 LOCAL_WHOLE_STATIC_LIBRARIES := liblog
 include $(BUILD_HOST_SHARED_LIBRARY)
 
+
 # Static library for host, 64-bit
 # ========================================================
 include $(CLEAR_VARS)

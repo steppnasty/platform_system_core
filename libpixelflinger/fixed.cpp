@@ -23,7 +23,6 @@
 
 // ------------------------------------------------------------------------
 
-PF_EXPORT
 int32_t gglRecipQNormalized(int32_t x, int* exponent)
 {
     const int32_t s = x>>31;
@@ -58,7 +57,6 @@ int32_t gglRecipQNormalized(int32_t x, int* exponent)
     return s ? -r : r;
 }
 
-PF_EXPORT
 int32_t gglRecipQ(GGLfixed x, int q)
 {
     int shift;
@@ -88,7 +86,6 @@ static const GGLfixed ggl_sqrt_reciproc_approx_tab[8] = {
     0x16A09, 0x15555, 0x143D1, 0x134BF, 0x1279A, 0x11C01, 0x111AC, 0x10865
 };
 
-PF_EXPORT
 GGLfixed gglSqrtRecipx(GGLfixed x)
 {
     if (x == 0)         return FIXED_MAX;
@@ -108,7 +105,6 @@ GGLfixed gglSqrtRecipx(GGLfixed x)
     return x;
 }
 
-PF_EXPORT
 GGLfixed gglSqrtx(GGLfixed a)
 {
     // Compute a full precision square-root (24 bits accuracy)
@@ -139,7 +135,6 @@ static const GGLfixed ggl_alog_approx_tab[] = { // domain [0 - 1.0]
 	0xffff, 0xeac0, 0xd744, 0xc567, 0xb504, 0xa5fe, 0x9837, 0x8b95, 0x8000
 };
 
-PF_EXPORT
 GGLfixed gglPowx(GGLfixed x, GGLfixed y)
 {
     // prerequisite: 0 <= x <= 1, and y >=0
@@ -176,7 +171,6 @@ GGLfixed gglPowx(GGLfixed x, GGLfixed y)
 
 // ------------------------------------------------------------------------
 
-PF_EXPORT
 int32_t gglDivQ(GGLfixed n, GGLfixed d, int32_t i)
 {
     //int32_t r =int32_t((int64_t(n)<<i)/d);
@@ -323,7 +317,6 @@ int32_t quick_muldiv(int32_t a, int32_t b, int32_t c)
 // this function computes a*b/c with 64-bit intermediate accuracy
 // overflows (e.g. division by 0) are handled and return INT_MAX
 
-PF_EXPORT
 int32_t gglMulDivi(int32_t a, int32_t b, int32_t c)
 {
 	int32_t result;

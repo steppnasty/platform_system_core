@@ -1,7 +1,7 @@
 #ifndef _SOCKET_CLIENT_H
 #define _SOCKET_CLIENT_H
 
-#include "../../../frameworks/native/include/utils/List.h"
+#include "List.h"
 
 #include <pthread.h>
 #include <cutils/atomic.h>
@@ -72,12 +72,12 @@ private:
     int sendMsg(const char *msg);
     void init(int socket, bool owned, bool useCmdNum);
 
-    // Sending binary data. The caller should make sure this is protected
+    // Sending binary data. The caller should use make sure this is protected
     // from multiple threads entering simultaneously.
-    // Returns 0 if successful, -1 if there is a 0 byte write and -2 if any other
-    // error ocurred (use errno to get the error)
+    // returns 0 if successful, -1 if there is a 0 byte write and -2 if any other
+    // error occurred (use errno to get the error)
     int sendDataLocked(const void *data, int len);
 };
 
-typedef android::List<SocketClient *> SocketClientCollection;
+typedef android::sysutils::List<SocketClient *> SocketClientCollection;
 #endif

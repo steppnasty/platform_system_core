@@ -67,7 +67,6 @@ static GGLFormat const gPixelFormatInfos[] =
 }; // namespace android
 
 
-PF_EXPORT
 const GGLFormat* gglGetPixelFormatTable(size_t* numEntries)
 {
     if (numEntries) {

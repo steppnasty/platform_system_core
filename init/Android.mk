@@ -34,7 +34,6 @@ LOCAL_MODULE_PATH := $(TARGET_ROOT_OUT)
 LOCAL_UNSTRIPPED_PATH := $(TARGET_ROOT_OUT_UNSTRIPPED)
 
 LOCAL_STATIC_LIBRARIES := libfs_mgr libcutils libc
-LOCAL_C_INCLUDES += system/core/fs_mgr/include
 
 ifeq ($(HAVE_SELINUX),true)
 LOCAL_STATIC_LIBRARIES += libselinux

@@ -17,8 +17,41 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include <cutils/debuggerd.h>
+#include <cutils/debugger.h>
 #include <cutils/sockets.h>
+
+int dump_tombstone(pid_t tid, char* pathbuf, size_t pathlen) {
+    int s = socket_local_client(DEBUGGER_SOCKET_NAME,
+            ANDROID_SOCKET_NAMESPACE_ABSTRACT, SOCK_STREAM);
+    if (s < 0) {
+        return -1;
+    }
+
+    debugger_msg_t msg;
+    msg.tid = tid;
+    msg.action = DEBUGGER_ACTION_DUMP_TOMBSTONE;
+
+    int result = 0;
+    if (TEMP_FAILURE_RETRY(write(s, &msg, sizeof(msg))) != sizeof(msg)) {
+        result = -1;
+    } else {
+        char ack;
+        if (TEMP_FAILURE_RETRY(read(s, &ack, 1)) != 1) {
+            result = -1;
+        } else {
+            if (pathbuf && pathlen) {
+                ssize_t n = TEMP_FAILURE_RETRY(read(s, pathbuf, pathlen - 1));
+                if (n <= 0) {
+                    result = -1;
+                } else {
+                    pathbuf[n] = '\0';
+                }
+            }
+        }
+    }
+    TEMP_FAILURE_RETRY(close(s));
+    return result;
+}
 
 int dump_backtrace_to_file(pid_t tid, int fd) {
     int s = socket_local_client(DEBUGGER_SOCKET_NAME,

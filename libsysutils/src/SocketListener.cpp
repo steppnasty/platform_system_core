@@ -172,7 +172,6 @@ void SocketListener::runListener() {
                 max = fd;
         }
         pthread_mutex_unlock(&mClientsLock);
-
         SLOGV("mListen=%d, max=%d, mSocketName=%s", mListen, max, mSocketName);
         if ((rc = select(max + 1, &read_fds, NULL, NULL, NULL)) < 0) {
             if (errno == EINTR)

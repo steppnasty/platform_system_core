@@ -14,7 +14,7 @@ PIXELFLINGER_SRC_FILES:= \
     codeflinger/GGLAssembler.cpp \
     codeflinger/load_store.cpp \
     codeflinger/blending.cpp \
-    codeflinger/texturing.cpp.arm \
+    codeflinger/texturing.cpp \
     codeflinger/disassem.c \
 	tinyutils/SharedBuffer.cpp \
 	tinyutils/VectorImpl.cpp \
@@ -40,14 +40,15 @@ endif
 
 ifeq ($(TARGET_ARCH),arm)
 # special optimization flags for pixelflinger
-PIXELFLINGER_CFLAGS += -fstrict-aliasing -fomit-frame-pointer \
-	-fexpensive-optimizations \
-	-ffast-math
+PIXELFLINGER_CFLAGS += -fstrict-aliasing -fomit-frame-pointer
 endif
 
-PIXELFLINGER_CFLAGS += \
-	-fvisibility=hidden \
-	-DPF_EXPORT="__attribute__((visibility(\"default\")))"
+ifeq ($(TARGET_ARCH),mips)
+PIXELFLINGER_SRC_FILES += codeflinger/MIPSAssembler.cpp
+PIXELFLINGER_SRC_FILES += codeflinger/mips_disassem.c
+PIXELFLINGER_SRC_FILES += arch-mips/t32cb16blend.S
+PIXELFLINGER_CFLAGS += -fstrict-aliasing -fomit-frame-pointer
+endif
 
 LOCAL_SHARED_LIBRARIES := libcutils
 
