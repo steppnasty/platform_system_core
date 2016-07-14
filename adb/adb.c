@@ -1076,6 +1076,13 @@ static int should_drop_privileges() {
                 property_get("service.adb.root", value, "");
                 if (strcmp(value, "1") == 0) {
                     secure = 0;
+                } else {
+                    // ...or if persist.sys.root_access property has been set
+                    // by Settings app
+                    property_get("persist.sys.root_access", value, "");
+                    if ((strcmp(value, "2") == 0) || (strcmp(value, "3") == 0)) {
+                        secure = 0;
+                    }
                 }
             }
         }
